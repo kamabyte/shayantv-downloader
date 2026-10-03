@@ -1,0 +1,43 @@
+# shayantv-downloader: one daemon that syncs https://shayantv.ru/cartoons/ every
+# INTERVAL_HOURS and downloads only new episodes. No web UI, so no ports.
+#
+# ${…} variables come from .env next to this file (or the stack's Environment tab
+# in Dokploy/Portainer); see .env.example.
+#
+# Host data:
+#   ${DATA_PATH}     SQLite state, lock, health file
+#   ${MEDIA_PATH}    the library (point a Jellyfin "Shows" library at it)
+#
+# Long-form bind mounts with create_host_path: false: if the disk isn't mounted
+# (or the directory isn't prepared) the container won't start rather than
+# silently writing somewhere else.
+
+services:
+  downloader:
+    image: ghcr.io/kamabyte/shayantv-downloader:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # Owner of DATA_PATH and MEDIA_PATH on the host.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+      INTERVAL_HOURS: ${INTERVAL_HOURS:-12}
+      CONCURRENCY: ${CONCURRENCY:-2}
+      # Optional: rescan Jellyfin as soon as new episodes land.
+      JELLYFIN_URL: ${JELLYFIN_URL:-}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
+    volumes:
+      - type: bind
+        source: ${DATA_PATH:?set DATA_PATH}
+        target: /data
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${MEDIA_PATH:?set MEDIA_PATH}
+        target: /library
+        bind: { create_host_path: false }
+    # On redeploy, let in-flight episodes finish; queued ones resume in the new container.
+    stop_grace_period: 2m
+    # Remuxing is light; keep it from competing with a media server on the same host.
+    cpu_shares: 256
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 512m }
