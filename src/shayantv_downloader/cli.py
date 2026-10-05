@@ -40,8 +40,7 @@ def _sync_once(cfg: Config, args: argparse.Namespace) -> int:
         except Exception as exc:
             health.sync_finished(cfg, f"{type(exc).__name__}: {exc}")
             raise
-        all_failed = bool(result.failed) and not result.downloaded
-        health.sync_finished(cfg, f"all {len(result.failed)} downloads failed" if all_failed else None)
+        health.sync_finished(cfg, result.error())
     log.info(
         "Sync finished: %d shows, %d new episodes, %d downloaded, %d failed",
         result.shows, result.new_episodes, result.downloaded, len(result.failed),

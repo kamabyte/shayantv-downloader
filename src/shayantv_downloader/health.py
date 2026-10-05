@@ -1,7 +1,7 @@
 """Liveness file for the container healthcheck (`shayantv-dl health`).
 
 Unhealthy when the daemon stops making progress (no heartbeat) or the last sync
-broke as a whole: the site couldn't be parsed, or every download failed.
+broke as a whole: the site couldn't be parsed, or every first-time download failed.
 Single episode failures are normal and retried, so they don't count.
 """
 

@@ -38,6 +38,18 @@ class SyncResult:
     new_episodes: int = 0
     downloaded: int = 0
     failed: list[str] = field(default_factory=list)
+    failed_again: int = 0  # failures of episodes that had already failed in an earlier sync
+
+    def error(self) -> str | None:
+        """Why this sync counts as broken for the healthcheck, or None.
+
+        Episodes that keep failing (gone from the CDN, no audio) are left out:
+        they would otherwise keep the container unhealthy forever.
+        """
+        fresh = len(self.failed) - self.failed_again
+        if fresh and not self.downloaded:
+            return f"all {fresh} new downloads failed"
+        return None
 
 
 def discover(cfg: Config, state: State, only: set[str] | None) -> SyncResult:
@@ -163,6 +175,7 @@ def download_pending(cfg: Config, state: State, only: set[str] | None, limit: in
             except Exception as exc:
                 state.mark_failed(ep.uid, str(exc))
                 result.failed.append(label)
+                result.failed_again += ep.attempts > 0
                 log.error("[%d/%d] FAILED %s: %s", i, len(todo), label, exc)
             else:
                 health.beat(cfg)

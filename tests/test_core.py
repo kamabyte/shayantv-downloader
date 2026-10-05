@@ -128,3 +128,12 @@ def test_health_states(tmp_path):
     assert health.check(cfg)[0] is False
     health.sync_finished(cfg, None)
     assert health.check(cfg)[0] is True
+
+
+def test_sync_error_ignores_episodes_that_keep_failing():
+    from shayantv_downloader.sync import SyncResult
+
+    assert SyncResult().error() is None
+    assert SyncResult(failed=["a", "b"], failed_again=2).error() is None
+    assert SyncResult(failed=["a", "b"], failed_again=1).error() == "all 1 new downloads failed"
+    assert SyncResult(downloaded=1, failed=["a"]).error() is None
