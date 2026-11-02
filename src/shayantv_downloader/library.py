@@ -8,10 +8,15 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
 POSTER_SIZE = (1000, 1500)
 STUDIO = "Шаян ТВ"
+# Bump when the artwork recipe changes: existing shows get redrawn on the next sync.
+ARTWORK_VERSION = "2"
+ARTWORK_STAMP = ".artwork-version"
+# How much a crop at the very edge of the image is penalised against one in the centre.
+CROP_CENTRE_BIAS = 0.25
 
 _FORBIDDEN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -90,15 +95,41 @@ def _open(data: bytes) -> Image.Image:
     return img.convert("RGB")
 
 
-def make_poster(landscape: Image.Image) -> Image.Image:
-    """Portrait 2:3 poster: the full landscape art over a blurred, darkened copy of itself."""
-    background = ImageOps.fit(landscape, POSTER_SIZE).filter(ImageFilter.GaussianBlur(40))
-    background = ImageEnhance.Brightness(background).enhance(0.55)
-    foreground = ImageOps.contain(landscape, POSTER_SIZE)
-    x = (POSTER_SIZE[0] - foreground.width) // 2
-    y = (POSTER_SIZE[1] - foreground.height) // 2
-    background.paste(foreground, (x, y))
-    return background
+def _busiest_crop_x(img: Image.Image, crop_width: int) -> int:
+    """Left edge of the crop window with the most detail: characters rather than sky."""
+    height = 128
+    scale = height / img.height
+    edges = img.convert("L").resize((round(img.width * scale), height)).filter(ImageFilter.FIND_EDGES)
+    edges = edges.crop((1, 1, edges.width - 1, edges.height - 1))  # FIND_EDGES leaves the border unfiltered
+    columns = edges.resize((edges.width, 1), Image.Resampling.BOX).tobytes()
+    window = round(crop_width * scale)
+    last = len(columns) - window
+    if last <= 0:
+        return (img.width - crop_width) // 2
+
+    def score(x: int) -> float:
+        off_centre = abs(x - last / 2) / (last / 2)
+        # +1 so that art with no detail at all still falls back to the centre.
+        return (sum(columns[x : x + window]) + 1) * (1 - CROP_CENTRE_BIAS * off_centre)
+
+    return min(round(max(range(last + 1), key=score) / scale), img.width - crop_width)
+
+
+def make_poster(art: Image.Image) -> Image.Image:
+    """Full-bleed 2:3 poster cut from the site's landscape art, because players show posters as tall cards."""
+    width, height = POSTER_SIZE
+    crop_width = round(art.height * width / height)
+    if crop_width >= art.width:  # already portrait or square: only the height can be trimmed
+        return ImageOps.fit(art, POSTER_SIZE)
+    x = _busiest_crop_x(art, crop_width)
+    return art.crop((x, 0, x + crop_width, art.height)).resize(POSTER_SIZE, Image.Resampling.LANCZOS)
+
+
+def artwork_is_current(show_dir: Path) -> bool:
+    try:
+        return (show_dir / ARTWORK_STAMP).read_text().strip() == ARTWORK_VERSION
+    except FileNotFoundError:
+        return False
 
 
 def write_show_artwork(show_dir: Path, image_data: bytes) -> None:
@@ -106,6 +137,7 @@ def write_show_artwork(show_dir: Path, image_data: bytes) -> None:
     _save_jpeg(img, show_dir / "fanart.jpg")
     _save_jpeg(img, show_dir / "landscape.jpg")
     _save_jpeg(make_poster(img), show_dir / "poster.jpg")
+    (show_dir / ARTWORK_STAMP).write_text(ARTWORK_VERSION)
 
 
 def write_thumb(path: Path, image_data: bytes) -> None:

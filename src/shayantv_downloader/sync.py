@@ -82,7 +82,7 @@ def _ensure_show_metadata(
     nfo = show_dir / "tvshow.nfo"
     if not nfo.exists():
         library.write_tvshow_nfo(nfo, title=title, slug=slug, url=url)
-    if image_url and not (show_dir / "poster.jpg").exists():
+    if image_url and not library.artwork_is_current(show_dir):
         try:
             library.write_show_artwork(show_dir, fetch(image_url, user_agent=cfg.user_agent))
         except Exception as exc:

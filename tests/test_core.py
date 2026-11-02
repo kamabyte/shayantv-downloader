@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 
 from PIL import Image
@@ -104,9 +105,53 @@ def test_sanitize():
     assert library.episode_basename("Три кота", 1, 5, "Пикник") == "Три кота - S01E05 - Пикник"
 
 
-def test_make_poster_is_portrait():
+def _art_with_detail_at(x: int) -> Image.Image:
+    img = Image.new("RGB", (1600, 900), "white")
+    for offset in range(0, 300, 20):
+        img.paste("black", (x + offset, 0, x + offset + 10, 900))
+    return img
+
+
+def test_make_poster_fills_the_whole_portrait_frame():
     poster = library.make_poster(Image.new("RGB", (1600, 696), "red"))
     assert poster.size == library.POSTER_SIZE
+    # No darkened blur bands above or below the art.
+    r, g, b = poster.getpixel((500, 5))
+    assert r > 250 and g < 5 and b < 5
+
+
+def test_make_poster_keeps_the_detailed_part_of_the_art():
+    crop_width = 600  # 900 px tall at 2:3
+    assert library._busiest_crop_x(_art_with_detail_at(1250), crop_width) >= 700
+    assert library._busiest_crop_x(_art_with_detail_at(50), crop_width) <= 100
+
+
+def test_make_poster_centres_a_crop_of_featureless_art():
+    # The window moves in steps of the downscaled edge map, about 7 px here.
+    assert abs(library._busiest_crop_x(Image.new("RGB", (1600, 900), "white"), 600) - 500) <= 10
+
+
+def test_make_poster_handles_art_that_is_already_portrait():
+    assert library.make_poster(Image.new("RGB", (500, 900), "red")).size == library.POSTER_SIZE
+    assert library.make_poster(Image.new("RGB", (900, 900), "red")).size == library.POSTER_SIZE
+
+
+def test_outdated_artwork_is_redrawn_once(tmp_path: Path, monkeypatch):
+    from shayantv_downloader import sync
+    from shayantv_downloader.config import Config
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (1600, 900), "red").save(buffer, "JPEG")
+    fetched = []
+    monkeypatch.setattr(sync, "fetch", lambda url, **_: fetched.append(url) or buffer.getvalue())
+
+    cfg = Config(library_dir=tmp_path, state_dir=tmp_path / "state")
+    (tmp_path / "poster.jpg").write_bytes(b"poster from an older version")
+    for _ in range(2):
+        sync._ensure_show_metadata(cfg, tmp_path, "Фиксики", "fiksiki", "https://x/fiksiki", "https://x/art.jpg")
+
+    assert fetched == ["https://x/art.jpg"]
+    assert Image.open(tmp_path / "poster.jpg").size == library.POSTER_SIZE
 
 
 def test_nfo_written(tmp_path: Path):
